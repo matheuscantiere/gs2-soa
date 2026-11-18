@@ -1,0 +1,950 @@
+openapi: 3.1.0
+info:
+  title: Rota Seca - Serviço de Risco da Rua
+  description: "API aberta da CitizenTech Rota Seca: previsão de alagamento por cruzamento,\
+    \ confirmações do CGE, reportes do sensor de nível e chuva atual (Open-Meteo).\
+    \ Backend consumido pelo app mobile Rota Seca. Horários em ISO 8601 com -03:00."
+  contact:
+    name: Rota Seca - FIAP Global Solution 2026.2
+  license:
+    name: Apache 2.0
+    url: http://springdoc.org
+  version: 1.0.0
+servers:
+- url: http://localhost:8080
+  description: Generated server url
+tags:
+- name: Risco
+  description: Previsão de alagamento por cruzamento (contrato do app mobile)
+- name: Cruzamentos
+  description: Cruzamentos cobertos pelo estudo (trechos monitorados)
+- name: Chuva
+  description: Intensidade da chuva atual e prevista (Open-Meteo)
+- name: Previsões
+  description: Entrada das probabilidades calculadas pelo modelo de ML
+- name: Alagamentos
+  description: Pontos de alagamento registrados pelo CGE
+- name: Reportes
+  description: "Reportes do sensor de nível (ESP32), do app e de parceiros"
+paths:
+  /previsoes:
+    put:
+      tags:
+      - Previsões
+      summary: Grava (ou atualiza) um lote de previsões horárias por cruzamento
+      operationId: gravar
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosLotePrevisao"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosResultadoPrevisoes"
+      security:
+      - bearer-key: []
+  /cruzamentos:
+    get:
+      tags:
+      - Cruzamentos
+      summary: Lista pública dos cruzamentos (usada pelo app mobile ao abrir)
+      operationId: listarPublico
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DadosCruzamento"
+    put:
+      tags:
+      - Cruzamentos
+      summary: Atualiza um cruzamento (campos nulos são ignorados)
+      operationId: atualizar
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosAtualizacaoCruzamento"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosDetalhamentoCruzamento"
+      security:
+      - bearer-key: []
+    post:
+      tags:
+      - Cruzamentos
+      summary: Cadastra um cruzamento
+      operationId: cadastrar
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosCadastroCruzamento"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosDetalhamentoCruzamento"
+      security:
+      - bearer-key: []
+  /reportes:
+    get:
+      tags:
+      - Reportes
+      summary: Lista paginada dos reportes recebidos
+      operationId: listar
+      parameters:
+      - name: page
+        in: query
+        description: Zero-based page index (0..N)
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        description: The size of the page to be returned
+        required: false
+        schema:
+          type: integer
+          default: 10
+          minimum: 1
+      - name: sort
+        in: query
+        description: "Sorting criteria in the format: property,(asc|desc). Default\
+          \ sort order is ascending. Multiple sort criteria are supported."
+        required: false
+        schema:
+          type: array
+          default:
+          - "recebidoEm,DESC"
+          items:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PageDadosListagemReporte"
+      security:
+      - bearer-key: []
+    post:
+      tags:
+      - Reportes
+      summary: "Recebe um reporte de alagamento (público: sensor e app enviam sem\
+        \ login)"
+      description: "Limite de 30 reportes por minuto por IP (HTTP 429). Telefone,\
+        \ CPF, e-mail e placa na descrição são trocados por [removido] (dados_removidos\
+        \ = true). Se a API estiver configurada com REPORTES_CHAVE_API, origem SENSOR/PARCEIRO\
+        \ exige o header X-Api-Key."
+      operationId: receber
+      parameters:
+      - name: X-Api-Key
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosReporte"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosDetalhamentoReporte"
+  /login:
+    post:
+      tags:
+      - Autenticação
+      summary: "Gera o token JWT. Após 5 senhas erradas, o login fica bloqueado por\
+        \ 15 min (HTTP 429)"
+      operationId: efetuarLogin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosLogin"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosTokenJWT"
+  /alagamentos:
+    get:
+      tags:
+      - Alagamentos
+      summary: Alagamentos ativos dentro de uma área (bbox)
+      operationId: listar_1
+      parameters:
+      - name: bbox
+        in: query
+        description: "minLon,minLat,maxLon,maxLat"
+        required: true
+        schema:
+          type: string
+        example: "-46.75,-23.75,-46.60,-23.60"
+      - name: desde
+        in: query
+        description: "Padrão: últimas 24 h"
+        required: false
+        schema:
+          type: string
+        example: 2025-01-16T00:00:00-03:00
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DadosAlagamento"
+    post:
+      tags:
+      - Alagamentos
+      summary: Registra a confirmação de um alagamento (carga do CGE)
+      operationId: registrar
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DadosRegistroAlagamento"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosAlagamento"
+      security:
+      - bearer-key: []
+  /risco:
+    get:
+      tags:
+      - Risco
+      summary: "Previsão de um cruzamento (?local=), de vários (?locais=a,b) ou de\
+        \ uma área (?bbox=)"
+      description: "Com 'em' (ISO 8601 com fuso), responde como teria respondido naquele\
+        \ instante. Horários sempre em -03:00; estimativa e limiar em fração (0.01083\
+        \ = 1,083%)."
+      operationId: consultar
+      parameters:
+      - name: local
+        in: query
+        description: Id do cruzamento
+        required: false
+        schema:
+          type: string
+        example: nu-jaime
+      - name: locais
+        in: query
+        description: "Ids separados por vírgula (ex.: nu-jaime,cruzamento-2)"
+        required: false
+        schema:
+          type: string
+      - name: bbox
+        in: query
+        description: "Área minLon,minLat,maxLon,maxLat; devolve a lista com o risco\
+          \ de cada cruzamento dentro dela (ex.: -46.75,-23.75,-46.60,-23.60)"
+        required: false
+        schema:
+          type: string
+      - name: em
+        in: query
+        description: Instante da consulta
+        required: false
+        schema:
+          type: string
+        example: 2025-01-16T18:48:00-03:00
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                oneOf:
+                - $ref: "#/components/schemas/DadosRisco"
+                - $ref: "#/components/schemas/DadosLoteRisco"
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/DadosRisco"
+  /reportes/{id}:
+    get:
+      tags:
+      - Reportes
+      summary: Detalha um reporte
+      operationId: detalhar
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosDetalhamentoReporte"
+      security:
+      - bearer-key: []
+  /health:
+    get:
+      tags:
+      - Health check
+      summary: Verificação de integridade da API
+      operationId: healthCheck
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /cruzamentos/{id}:
+    get:
+      tags:
+      - Cruzamentos
+      summary: Detalha um cruzamento
+      operationId: detalhar_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosDetalhamentoCruzamento"
+    delete:
+      tags:
+      - Cruzamentos
+      summary: Exclusão lógica de um cruzamento
+      operationId: excluir
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+      security:
+      - bearer-key: []
+  /cruzamentos/admin:
+    get:
+      tags:
+      - Cruzamentos
+      summary: Lista paginada de cruzamentos (administração)
+      operationId: listar_2
+      parameters:
+      - name: page
+        in: query
+        description: Zero-based page index (0..N)
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        description: The size of the page to be returned
+        required: false
+        schema:
+          type: integer
+          default: 10
+          minimum: 1
+      - name: sort
+        in: query
+        description: "Sorting criteria in the format: property,(asc|desc). Default\
+          \ sort order is ascending. Multiple sort criteria are supported."
+        required: false
+        schema:
+          type: array
+          default:
+          - "ordem,ASC"
+          items:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PageDadosListagemCruzamento"
+      security:
+      - bearer-key: []
+  /chuva:
+    get:
+      tags:
+      - Chuva
+      summary: "Chuva atual e prevista (mm/h, de 15 em 15 min) em um ponto"
+      operationId: consultar_1
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+        example: -23.6814075
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+        example: -46.694591
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DadosChuva"
+  /alertas:
+    get:
+      tags:
+      - Risco
+      summary: Alertas de um cruzamento (previsões elevadas e confirmações do CGE)
+        desde uma data
+      operationId: alertas
+      parameters:
+      - name: local
+        in: query
+        required: true
+        schema:
+          type: string
+        example: nu-jaime
+      - name: desde
+        in: query
+        required: false
+        schema:
+          type: string
+        example: 2025-01-16T00:00:00-03:00
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DadosRisco"
+components:
+  schemas:
+    DadosLotePrevisao:
+      type: object
+      properties:
+        fonte:
+          type: string
+          maxLength: 30
+          minLength: 0
+        previsoes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DadosPrevisao"
+          minItems: 1
+      required:
+      - fonte
+      - previsoes
+    DadosPrevisao:
+      type: object
+      properties:
+        local_id:
+          type: string
+          minLength: 1
+        previsao_hora:
+          type: string
+          minLength: 1
+        estimativa:
+          type: number
+          maximum: 1
+          minimum: 0
+        limiar:
+          type: number
+          maximum: 1
+          minimum: 0
+      required:
+      - estimativa
+      - local_id
+      - previsao_hora
+    DadosResultadoPrevisoes:
+      type: object
+      properties:
+        gravadas:
+          type: integer
+          format: int32
+    DadosAtualizacaoCruzamento:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        nome:
+          type: string
+          maxLength: 150
+          minLength: 0
+        nome_curto:
+          type: string
+          maxLength: 100
+          minLength: 0
+        via:
+          type: string
+          maxLength: 100
+          minLength: 0
+        bairro:
+          type: string
+          maxLength: 100
+          minLength: 0
+        latitude:
+          type: number
+          maximum: 90
+          minimum: -90
+        longitude:
+          type: number
+          maximum: 180
+          minimum: -180
+        placeholder:
+          type: boolean
+        ordem:
+          type: integer
+          format: int32
+          minimum: 0
+      required:
+      - id
+    DadosDetalhamentoCruzamento:
+      type: object
+      properties:
+        id:
+          type: string
+        nome:
+          type: string
+        nome_curto:
+          type: string
+        via:
+          type: string
+        bairro:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        placeholder:
+          type: boolean
+        ordem:
+          type: integer
+          format: int32
+        ativo:
+          type: boolean
+    DadosReporte:
+      type: object
+      properties:
+        origem:
+          type: string
+          enum:
+          - SENSOR
+          - APP
+          - PARCEIRO
+        local_id:
+          type: string
+        latitude:
+          type: number
+          maximum: 90
+          minimum: -90
+        longitude:
+          type: number
+          maximum: 180
+          minimum: -180
+        nivel_cm:
+          type: integer
+          format: int32
+          maximum: 200
+          minimum: 0
+        descricao:
+          type: string
+          maxLength: 280
+          minLength: 0
+      required:
+      - latitude
+      - longitude
+      - origem
+    DadosDetalhamentoReporte:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        origem:
+          type: string
+          enum:
+          - SENSOR
+          - APP
+          - PARCEIRO
+        local_id:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        nivel_cm:
+          type: integer
+          format: int32
+        faixa:
+          type: string
+        descricao:
+          type: string
+        recebido_em:
+          type: string
+        dados_removidos:
+          type: boolean
+    DadosLogin:
+      type: object
+      properties:
+        login:
+          type: string
+          minLength: 1
+        senha:
+          type: string
+          minLength: 1
+      required:
+      - login
+      - senha
+    DadosTokenJWT:
+      type: object
+      properties:
+        token:
+          type: string
+    DadosCadastroCruzamento:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          pattern: "^[a-z0-9-]{3,40}$"
+        nome:
+          type: string
+          maxLength: 150
+          minLength: 0
+        nome_curto:
+          type: string
+          maxLength: 100
+          minLength: 0
+        via:
+          type: string
+          maxLength: 100
+          minLength: 0
+        bairro:
+          type: string
+          maxLength: 100
+          minLength: 0
+        latitude:
+          type: number
+          maximum: 90
+          minimum: -90
+        longitude:
+          type: number
+          maximum: 180
+          minimum: -180
+        placeholder:
+          type: boolean
+        ordem:
+          type: integer
+          format: int32
+          minimum: 0
+      required:
+      - id
+      - nome
+      - nome_curto
+      - placeholder
+    DadosRegistroAlagamento:
+      type: object
+      properties:
+        local_id:
+          type: string
+          minLength: 1
+        registrado_em:
+          type: string
+          minLength: 1
+        intransitavel:
+          type: boolean
+        fonte:
+          type: string
+          enum:
+          - CGE
+          - DEFESA_CIVIL
+      required:
+      - local_id
+      - registrado_em
+    DadosAlagamento:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        local_id:
+          type: string
+        cruzamento:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        registrado_em:
+          type: string
+        fonte:
+          type: string
+          enum:
+          - CGE
+          - DEFESA_CIVIL
+        intransitavel:
+          type: boolean
+    DadosRisco:
+      type: object
+      properties:
+        local_id:
+          type: string
+        cruzamento:
+          type: string
+        previsao_hora:
+          type: string
+        valida_ate:
+          type: string
+        estimativa:
+          type: number
+          format: double
+        limiar:
+          type: number
+          format: double
+        status:
+          type: string
+        confirmado_cge:
+          type: boolean
+        confirmado_em:
+          type: string
+    DadosLoteRisco:
+      type: object
+      properties:
+        riscos:
+          type: array
+          items:
+            $ref: "#/components/schemas/DadosRisco"
+        nao_encontrados:
+          type: array
+          items:
+            type: string
+    DadosListagemReporte:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        origem:
+          type: string
+          enum:
+          - SENSOR
+          - APP
+          - PARCEIRO
+        local_id:
+          type: string
+        faixa:
+          type: string
+        recebido_em:
+          type: string
+    PageDadosListagemReporte:
+      type: object
+      properties:
+        totalPages:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int32
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/DadosListagemReporte"
+        number:
+          type: integer
+          format: int32
+        sort:
+          $ref: "#/components/schemas/SortObject"
+        pageable:
+          $ref: "#/components/schemas/PageableObject"
+        numberOfElements:
+          type: integer
+          format: int32
+        first:
+          type: boolean
+        last:
+          type: boolean
+        empty:
+          type: boolean
+    PageableObject:
+      type: object
+      properties:
+        paged:
+          type: boolean
+        pageNumber:
+          type: integer
+          format: int32
+        pageSize:
+          type: integer
+          format: int32
+        sort:
+          $ref: "#/components/schemas/SortObject"
+        unpaged:
+          type: boolean
+        offset:
+          type: integer
+          format: int64
+    SortObject:
+      type: object
+      properties:
+        sorted:
+          type: boolean
+        unsorted:
+          type: boolean
+        empty:
+          type: boolean
+    DadosCruzamento:
+      type: object
+      properties:
+        id:
+          type: string
+        nome:
+          type: string
+        nome_curto:
+          type: string
+        via:
+          type: string
+        bairro:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        placeholder:
+          type: boolean
+    DadosListagemCruzamento:
+      type: object
+      properties:
+        id:
+          type: string
+        nome_curto:
+          type: string
+        bairro:
+          type: string
+        placeholder:
+          type: boolean
+        ordem:
+          type: integer
+          format: int32
+    PageDadosListagemCruzamento:
+      type: object
+      properties:
+        totalPages:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        size:
+          type: integer
+          format: int32
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/DadosListagemCruzamento"
+        number:
+          type: integer
+          format: int32
+        sort:
+          $ref: "#/components/schemas/SortObject"
+        pageable:
+          $ref: "#/components/schemas/PageableObject"
+        numberOfElements:
+          type: integer
+          format: int32
+        first:
+          type: boolean
+        last:
+          type: boolean
+        empty:
+          type: boolean
+    DadosChuva:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        medido_em:
+          type: string
+        intensidade_atual_mm_h:
+          type: number
+          format: double
+        prevista:
+          type: array
+          items:
+            $ref: "#/components/schemas/DadosPontoChuva"
+        fonte:
+          type: string
+    DadosPontoChuva:
+      type: object
+      properties:
+        hora:
+          type: string
+        intensidade_mm_h:
+          type: number
+          format: double
+  securitySchemes:
+    bearer-key:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

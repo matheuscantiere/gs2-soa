@@ -1,0 +1,7 @@
+target/
+.git/
+docs/
+docs-plan/
+evidencias/
+.idea/
+.vscode/
